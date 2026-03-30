@@ -1,0 +1,7 @@
+# Julia binding (future)
+#
+# Implement the mitchell store schema using Zarr.jl.
+# No dependency on the Python package — each language implements the schema
+# independently on top of its own zarr backend.
+#
+# See the mitchell schema specification in docs/ for the store layout contract.
