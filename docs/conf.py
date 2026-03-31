@@ -12,6 +12,25 @@ extensions = [
     "myst_parser",
     "sphinxcontrib.katex",
     "kentigern",
+    "sphinx.ext.intersphinx",
+]
+
+# -- Intersphinx -------------------------------------------------------------
+intersphinx_mapping = {
+    "python": ("https://docs.python.org/3", None),
+    "zarr": ("https://zarr.readthedocs.io/en/stable", None),
+    "arviz": ("https://python.arviz.org/en/stable", None),
+}
+
+# Suppress cross-reference warnings for types whose inventories may be
+# incomplete or missing (e.g. zarr internal sub-modules, arviz aliases).
+nitpick_ignore = [
+    ("py:class", "zarr.Group"),
+    ("py:class", "zarr.attrs.Attributes"),
+    ("py:class", "zarr.storage.StoreLike"),
+    ("py:func", "zarr.open_group"),
+    ("py:class", "arviz.InferenceData"),
+    ("py:class", "os.PathLike"),
 ]
 
 # -- AutoAPI -----------------------------------------------------------------
