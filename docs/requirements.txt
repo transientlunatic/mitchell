@@ -1,0 +1,5 @@
+sphinx >= 7
+kentigern
+myst-parser
+sphinxcontrib-katex
+sphinx-autoapi

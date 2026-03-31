@@ -10,4 +10,11 @@ JavaScript via zarr.js) can read a mitchell store without going through this
 package.
 """
 
-__version__ = "0.1.0"
+try:
+    from mitchell._version import __version__
+except ImportError:
+    __version__ = "0.0.0+unknown"
+
+from mitchell.store import Analysis, Event, MitchellStore
+
+__all__ = ["Analysis", "Event", "MitchellStore"]

@@ -1,10 +1,10 @@
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling", "hatch-vcs"]
 build-backend = "hatchling.build"
 
 [project]
 name = "mitchell"
-version = "0.1.0"
+dynamic = ["version"]
 description = "Cloud-ready gravitational-wave analysis data library using zarr"
 readme = "README.md"
 license = { text = "MIT" }
@@ -13,7 +13,12 @@ dependencies = [
     "zarr >= 3.0",
     "numpy >= 1.24",
     "fsspec >= 2023.1",
+    "arviz",
+    "click >= 8.0",
 ]
+
+[project.scripts]
+mitchell = "mitchell.cli:cli"
 
 [project.optional-dependencies]
 cloud = [
@@ -26,9 +31,22 @@ dev = [
     "ruff",
     "mypy >= 1.0",
 ]
+docs = [
+    "sphinx >= 7",
+    "kentigern",
+    "myst-parser",
+    "sphinxcontrib-katex",
+    "sphinx-autoapi",
+]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/mitchell"]
+
+[tool.hatch.version]
+source = "vcs"
+
+[tool.hatch.build.hooks.vcs]
+version-file = "src/mitchell/_version.py"
 
 [tool.ruff]
 src = ["src"]
