@@ -1,0 +1,8 @@
+{
+  "attributes": {
+    "mass_1": "Uniform(minimum=5, maximum=100)",
+    "mass_2": "Uniform(minimum=5, maximum=100)"
+  },
+  "zarr_format": 3,
+  "node_type": "group"
+}
