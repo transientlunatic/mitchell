@@ -5,7 +5,7 @@
  * data products (posterior samples, PSDs, skymaps, …) stored in the
  * Mitchell zarr v3 schema.
  *
- * For Node.js filesystem access import {@link FileSystemStore} from the
+ * For Node.js filesystem access import ``FileSystemStore`` from the
  * ``@mitchell/javascript/node`` sub-path export.  For HTTP/cloud access
  * use zarrita's built-in ``FetchStore`` directly.
  *
@@ -35,4 +35,5 @@ export {
   PSDs,
   Skymap,
 } from "./store.js";
+export type { Array2D } from "./store.js";
 export type { AnalysisAttrs, ArrayChunk, ConsolidatedEntry } from "./types.js";

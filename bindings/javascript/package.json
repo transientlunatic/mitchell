@@ -35,6 +35,7 @@
   "devDependencies": {
     "@types/node": "^22",
     "tsup": "^8",
+    "typedoc": "^0.28.18",
     "typescript": "^5",
     "vitest": "^2"
   },

@@ -1,5 +1,5 @@
 /**
- * Core Mitchell API: {@link MitchellStore}, {@link Event}, and {@link Analysis}.
+ * Core Mitchell API: ``MitchellStore``, ``Event``, and ``Analysis``.
  *
  * The three classes mirror the Python ``mitchell`` package.  All
  * discovery (listing events, analyses, parameter names) is performed
@@ -98,7 +98,7 @@ export class PosteriorSamples {
    * Load the float64 data for a single parameter.
    *
    * @param param  Parameter name, e.g. ``"mass_1"``.
-   * @throws If ``param`` is not in {@link parameterNames}.
+   * @throws If ``param`` is not in ``parameterNames()``.
    */
   async get(param: string): Promise<Float64Array> {
     if (!this.params.includes(param)) {
@@ -116,7 +116,7 @@ export class PosteriorSamples {
   /**
    * Load all parameters into memory in parallel.
    *
-   * @returns A mapping of parameter name → {@link Float64Array}.
+   * @returns A mapping of parameter name → ``Float64Array``.
    */
   async getAll(): Promise<Record<string, Float64Array>> {
     const entries = await Promise.all(
@@ -151,7 +151,7 @@ export class Priors {
   /**
    * Sampled prior draws, or ``null`` if none were stored.
    *
-   * The returned object exposes the same API as {@link PosteriorSamples}.
+   * The returned object exposes the same API as ``PosteriorSamples``.
    */
   get samples(): PosteriorSamples | null {
     if (!this.hasSamples()) return null;
@@ -199,7 +199,7 @@ export class PSDs {
    * Load the PSD array for a detector.
    *
    * @param detector  Detector name, e.g. ``"H1"`` or ``"L1"``.
-   * @throws If ``detector`` is not in {@link detectorNames}.
+   * @throws If ``detector`` is not in ``detectorNames()``.
    */
   async get(detector: string): Promise<Array2D> {
     if (!this.detectors.includes(detector)) {
@@ -238,7 +238,7 @@ export class CalibrationEnvelope {
    * Load the calibration envelope array for a detector.
    *
    * @param detector  Detector name, e.g. ``"H1"``.
-   * @throws If ``detector`` is not in {@link detectorNames}.
+   * @throws If ``detector`` is not in ``detectorNames()``.
    */
   async get(detector: string): Promise<Array2D> {
     if (!this.detectors.includes(detector)) {
@@ -467,9 +467,9 @@ export class Event {
 /**
  * A zarr-backed store of gravitational-wave analysis data products.
  *
- * Open an existing store with {@link MitchellStore.open}, passing any
+ * Open an existing store with ``MitchellStore.open()``, passing any
  * zarrita-compatible store object.  For local filesystem access from
- * Node.js use {@link FileSystemStore} from ``@mitchell/javascript/node``;
+ * Node.js use ``FileSystemStore`` from ``@mitchell/javascript/node``;
  * for HTTP/cloud access use zarrita's built-in ``FetchStore``.
  *
  * Discovery (listing events and analyses) is performed synchronously
@@ -512,8 +512,8 @@ export class MitchellStore {
    * Reads and parses the root ``zarr.json`` (including consolidated
    * metadata) in a single request.
    *
-   * @param store  Any {@link Readable} store.  Accepts
-   *               {@link FileSystemStore} (Node.js), ``zarrita.FetchStore``
+   * @param store  Any zarrita ``Readable`` store.  Accepts
+   *               ``FileSystemStore`` (Node.js), ``zarrita.FetchStore``
    *               (browser/HTTP), or an in-memory
    *               ``Map<string, Uint8Array>``.
    * @throws If ``/zarr.json`` is absent, the node is not a zarr v3 group,

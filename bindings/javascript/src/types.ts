@@ -82,7 +82,7 @@ export interface MitchellRootMetadata {
  * A flat chunk of array data as returned by ``zarrita.get()``.
  *
  * The ``data`` buffer is a row-major (C-order) flattened typed array.
- * For float64 arrays this is a {@link Float64Array}; use ``shape`` to
+ * For float64 arrays this is a ``Float64Array``; use ``shape`` to
  * interpret the dimensionality.
  */
 export interface ArrayChunk {

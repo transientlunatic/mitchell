@@ -1,0 +1,7 @@
+{
+  "tsconfig": "../bindings/javascript/tsconfig.json",
+  "skipErrorChecking": true,
+  "excludeInternal": true,
+  "excludePrivate": true,
+  "excludeExternals": true
+}
