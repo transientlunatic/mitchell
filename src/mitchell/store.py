@@ -186,8 +186,8 @@ class MitchellStore:
     """A zarr-backed store of gravitational-wave analysis data products.
 
     Open an existing store or create a new one with
-    :meth:`MitchellStore.open`.  To import from a GWTC-style bilby HDF5
-    file use :meth:`MitchellStore.from_bilby_h5`.
+    :meth:`MitchellStore.open`.  To import from a GWTC-style PEsummary HDF5
+    file use :meth:`MitchellStore.from_pesummary_h5`.
 
     Parameters
     ----------
@@ -223,13 +223,13 @@ class MitchellStore:
         return cls(store, mode=mode)
 
     @classmethod
-    def from_bilby_h5(
+    def from_pesummary_h5(
         cls,
         h5_path: str | os.PathLike,
         event_name: str,
         zarr_path: str | os.PathLike,
     ) -> MitchellStore:
-        """Translate a GWTC bilby HDF5 file into a new Mitchell zarr store.
+        """Translate a GWTC pesummary HDF5 file into a new Mitchell zarr store.
 
         Parameters
         ----------

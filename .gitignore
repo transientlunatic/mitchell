@@ -2,3 +2,5 @@
 .*_cache/
 *.h5
 zarr_test/
+src/mitchell/__pycache__/
+tests/__pycache__/
