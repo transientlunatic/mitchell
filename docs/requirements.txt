@@ -3,3 +3,4 @@ kentigern
 myst-parser
 sphinxcontrib-katex
 sphinx-autoapi
+sphinx-js >= 5.0, < 6

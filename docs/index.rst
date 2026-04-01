@@ -12,6 +12,12 @@ backed by `zarr <https://zarr.dev>`_.
    schema.md
 
 .. toctree::
+   :maxdepth: 2
+   :caption: Language bindings
+
+   javascript.md
+
+.. toctree::
    :maxdepth: 1
    :caption: Reference
 
