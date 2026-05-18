@@ -1,3 +1,5 @@
+import shutil
+
 import numpy as np
 import pytest
 import zarr
@@ -5,7 +7,7 @@ from click.testing import CliRunner
 
 import mitchell
 from mitchell import Analysis, Event, MitchellStore
-from mitchell.cli import cli
+from mitchell.cli import _infer_event_name, cli
 
 
 def test_version() -> None:
@@ -240,26 +242,25 @@ class TestCli:
         assert result.exit_code == 0
         assert mitchell.__version__ in result.output
 
-    def test_from_bilby_h5_help(self, runner):
-        result = runner.invoke(cli, ["from-bilby-h5", "--help"])
+    def test_from_pesummary_help(self, runner):
+        result = runner.invoke(cli, ["from-pesummary", "--help"])
         assert result.exit_code == 0
         assert "H5_PATH" in result.output
-        assert "EVENT_NAME" in result.output
         assert "ZARR_PATH" in result.output
 
-    def test_from_bilby_h5_missing_args(self, runner):
-        result = runner.invoke(cli, ["from-bilby-h5"])
+    def test_from_pesummary_missing_args(self, runner):
+        result = runner.invoke(cli, ["from-pesummary"])
         assert result.exit_code != 0
 
-    def test_from_bilby_h5_bad_h5_path(self, runner, tmp_path):
+    def test_from_pesummary_bad_h5_path(self, runner, tmp_path):
         result = runner.invoke(
             cli,
-            ["from-bilby-h5", "nonexistent.h5", "GW000000", str(tmp_path / "out.zarr")],
+            ["from-pesummary", "nonexistent.h5", str(tmp_path / "out.zarr")],
         )
         assert result.exit_code != 0
 
-    def test_from_bilby_h5_runs(self, runner, tmp_path):
-        """End-to-end: translate the real HDF5 file if it exists, skip otherwise."""
+    def test_from_pesummary_runs(self, runner, tmp_path):
+        """End-to-end single-file conversion with explicit event name."""
         h5_path = (
             "/home/daniel/repositories/ligo/pe-next/mitchell/mitchell"
             "/IGWN-GWTC2p1-v2-GW150914_095045_PEDataRelease_mixed_cosmo.h5"
@@ -269,10 +270,128 @@ class TestCli:
             pytest.skip("HDF5 test file not present")
         out = tmp_path / "out.zarr"
         result = runner.invoke(
-            cli, ["from-bilby-h5", h5_path, "GW150914_095045", str(out)]
+            cli,
+            ["from-pesummary", h5_path, str(out), "--event-name", "GW150914_095045"],
         )
         assert result.exit_code == 0
         assert "Done." in result.output
         store = MitchellStore.open(out, mode="r")
         assert len(store) == 1
+
+    def test_from_pesummary_infers_event_name(self, runner, tmp_path):
+        """Event name is inferred from the GWTC filename when not given."""
+        h5_path = (
+            "/home/daniel/repositories/ligo/pe-next/mitchell/mitchell"
+            "/IGWN-GWTC2p1-v2-GW150914_095045_PEDataRelease_mixed_cosmo.h5"
+        )
+        pytest.importorskip("h5py")
+        if not __import__("pathlib").Path(h5_path).exists():
+            pytest.skip("HDF5 test file not present")
+        out = tmp_path / "out.zarr"
+        result = runner.invoke(cli, ["from-pesummary", h5_path, str(out)])
+        assert result.exit_code == 0
+        store = MitchellStore.open(out, mode="r")
+        assert store["GW150914_095045"] is not None
+
+    def test_from_pesummary_append(self, runner, tmp_path):
+        """Running twice with different event names appends to the same store."""
+        pytest.importorskip("h5py")
+        h5_path = (
+            "/home/daniel/repositories/ligo/pe-next/mitchell/mitchell"
+            "/IGWN-GWTC2p1-v2-GW150914_095045_PEDataRelease_mixed_cosmo.h5"
+        )
+        if not __import__("pathlib").Path(h5_path).exists():
+            pytest.skip("HDF5 test file not present")
+        out = tmp_path / "out.zarr"
+        runner.invoke(
+            cli,
+            ["from-pesummary", h5_path, str(out), "--event-name", "GW150914_095045"],
+        )
+        runner.invoke(
+            cli,
+            ["from-pesummary", h5_path, str(out), "--event-name", "GW150914_copy"],
+        )
+        store = MitchellStore.open(out, mode="r")
+        assert len(store) == 2
+
+    def test_from_pesummary_overwrite(self, runner, tmp_path):
+        """--overwrite replaces an existing store rather than appending."""
+        pytest.importorskip("h5py")
+        h5_path = (
+            "/home/daniel/repositories/ligo/pe-next/mitchell/mitchell"
+            "/IGWN-GWTC2p1-v2-GW150914_095045_PEDataRelease_mixed_cosmo.h5"
+        )
+        if not __import__("pathlib").Path(h5_path).exists():
+            pytest.skip("HDF5 test file not present")
+        out = tmp_path / "out.zarr"
+        runner.invoke(
+            cli,
+            ["from-pesummary", h5_path, str(out), "--event-name", "GW150914_095045"],
+        )
+        result = runner.invoke(
+            cli,
+            [
+                "from-pesummary", "--overwrite", h5_path, str(out),
+                "--event-name", "GW150914_095045",
+            ],
+        )
+        assert result.exit_code == 0
+        store = MitchellStore.open(out, mode="r")
+        assert len(store) == 1
+
+    def test_from_pesummary_directory(self, runner, tmp_path):
+        """A directory of .h5 files is batch-converted into a single store."""
+        h5_path = __import__("pathlib").Path(
+            "/home/daniel/repositories/ligo/pe-next/mitchell/mitchell"
+            "/IGWN-GWTC2p1-v2-GW150914_095045_PEDataRelease_mixed_cosmo.h5"
+        )
+        pytest.importorskip("h5py")
+        if not h5_path.exists():
+            pytest.skip("HDF5 test file not present")
+        src_dir = tmp_path / "metafiles"
+        src_dir.mkdir()
+        shutil.copy(h5_path, src_dir / h5_path.name)
+        shutil.copy(
+            h5_path,
+            src_dir / "IGWN-GWTC2p1-v2-GW151226_033853_PEDataRelease_mixed_cosmo.h5",
+        )
+        out = tmp_path / "out.zarr"
+        result = runner.invoke(cli, ["from-pesummary", str(src_dir), str(out)])
+        assert result.exit_code == 0
+        store = MitchellStore.open(out, mode="r")
+        assert len(store) == 2
+
+    def test_from_pesummary_directory_rejects_event_name(self, runner, tmp_path):
+        """--event-name together with a directory is an error."""
+        src_dir = tmp_path / "metafiles"
+        src_dir.mkdir()
+        out = tmp_path / "out.zarr"
+        result = runner.invoke(
+            cli,
+            [
+                "from-pesummary", str(src_dir), str(out),
+                "--event-name", "GW150914_095045",
+            ],
+        )
+        assert result.exit_code != 0
+
+
+# ---------------------------------------------------------------------------
+# Event name inference unit tests
+# ---------------------------------------------------------------------------
+
+class TestInferEventName:
+    def test_standard_gwtc_filename(self, tmp_path):
+        p = tmp_path / "IGWN-GWTC2p1-v2-GW150914_095045_PEDataRelease_mixed_cosmo.h5"
+        assert _infer_event_name(p) == "GW150914_095045"
+
+    def test_minimal_filename(self, tmp_path):
+        p = tmp_path / "GW200105_162426.h5"
+        assert _infer_event_name(p) == "GW200105_162426"
+
+    def test_no_gw_pattern_raises(self, tmp_path):
+        import click
+        p = tmp_path / "some_random_file.h5"
+        with pytest.raises(click.BadParameter):
+            _infer_event_name(p)
 

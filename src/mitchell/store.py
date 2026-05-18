@@ -228,8 +228,9 @@ class MitchellStore:
         h5_path: str | os.PathLike,
         event_name: str,
         zarr_path: str | os.PathLike,
+        mode: str = "a",
     ) -> MitchellStore:
-        """Translate a GWTC pesummary HDF5 file into a new Mitchell zarr store.
+        """Translate a GWTC pesummary HDF5 file into a Mitchell zarr store.
 
         Parameters
         ----------
@@ -238,16 +239,19 @@ class MitchellStore:
         event_name:
             Human-readable event identifier, e.g. ``"GW150914_095045"``.
         zarr_path:
-            Destination directory for the new zarr store.
+            Destination directory for the zarr store.
+        mode:
+            Zarr open mode.  Use ``"a"`` (default) to append an event to an
+            existing store, or ``"w"`` to overwrite the store from scratch.
 
         Returns
         -------
         MitchellStore
-            The newly created store, opened in append mode.
+            The store, opened in the requested mode.
         """
         import h5py as h5
 
-        instance = cls.open(zarr_path, mode="w")
+        instance = cls.open(zarr_path, mode=mode)
         root = instance._root
         event = root.require_group(f"events/{event_name}")
 

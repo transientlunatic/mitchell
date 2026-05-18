@@ -1,6 +1,19 @@
+# Python
 .venv/
 .*_cache/
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+
+# Test / data fixtures
 *.h5
 zarr_test/
-src/mitchell/__pycache__/
-tests/__pycache__/
+
+# JavaScript / Node
+node_modules/
+bindings/javascript/dist/
+
+# Docs build output
+docs/_build/
