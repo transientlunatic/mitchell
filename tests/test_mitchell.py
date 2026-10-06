@@ -8,6 +8,7 @@ from click.testing import CliRunner
 import mitchell
 from mitchell import Analysis, Event, MitchellStore
 from mitchell.cli import _infer_event_name, cli
+from mitchell.store import _decode
 
 
 def test_version() -> None:
@@ -379,6 +380,32 @@ class TestCli:
 # ---------------------------------------------------------------------------
 # Event name inference unit tests
 # ---------------------------------------------------------------------------
+
+class TestDecode:
+    def test_unwraps_length_one_array(self):
+        assert _decode(np.array([3.5])) == 3.5
+
+    def test_decodes_bytes(self):
+        assert _decode(b"hello") == "hello"
+
+    def test_converts_numpy_int_to_native(self):
+        result = _decode(np.int64(7))
+        assert result == 7
+        assert type(result) is int
+
+    def test_converts_numpy_bool_to_native(self):
+        result = _decode(np.bool_(True))
+        assert result is True
+
+    def test_numpy_int_is_json_serializable_after_decode(self):
+        import json
+
+        json.dumps(_decode(np.int64(7)))
+
+    def test_leaves_plain_values_untouched(self):
+        assert _decode(3.5) == 3.5
+        assert _decode("already a string") == "already a string"
+
 
 class TestInferEventName:
     def test_standard_gwtc_filename(self, tmp_path):

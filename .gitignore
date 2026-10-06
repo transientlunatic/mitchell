@@ -11,9 +11,9 @@ build/
 *.h5
 zarr_test/
 
-# JavaScript / Node
+# JavaScript / Node  (JS bindings have moved to the viewer repo)
 node_modules/
-bindings/javascript/dist/
+bindings/javascript/
 
 # Docs build output
 docs/_build/

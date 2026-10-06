@@ -99,3 +99,76 @@ def _run_batch(files: list[Path], zarr_path: str, overwrite: bool) -> None:
         event_name = _infer_event_name(h5_path)
         mode = "w" if (overwrite and i == 0) else "a"
         _run_single(h5_path, event_name, zarr_path, mode)
+
+
+@cli.command("from-gwtc")
+@click.argument("zarr_path", type=click.Path())
+@click.option(
+    "--catalogue",
+    "catalogues",
+    multiple=True,
+    metavar="NAME",
+    help="Restrict to one or more catalogues (e.g. GWTC-2.1). Repeatable. "
+    "Defaults to every catalogue in the gwresults registry.",
+)
+@click.option(
+    "--event",
+    "events",
+    multiple=True,
+    metavar="NAME",
+    help="Restrict to specific event name(s). Repeatable. Overrides --catalogue.",
+)
+@click.option(
+    "--limit",
+    type=int,
+    default=None,
+    help="Process at most N events (useful for smoke-testing).",
+)
+@click.option(
+    "--keep-cache",
+    is_flag=True,
+    default=False,
+    help="Keep each downloaded HDF5 in the gwresults cache instead of "
+    "deleting it right after conversion.",
+)
+def from_gwtc(
+    zarr_path: str,
+    catalogues: tuple[str, ...],
+    events: tuple[str, ...],
+    limit: int | None,
+    keep_cache: bool,
+) -> None:
+    """Fetch published GWTC events via gwresults and convert them into ZARR_PATH.
+
+    Requires the optional 'gwresults' package (``pip install
+    'mitchell[gwtc]'``). Streams one event at a time — download, convert,
+    delete the HDF5 — so local disk use stays small even across a full
+    catalogue. Already-converted events are skipped, so an interrupted run
+    can simply be re-invoked.
+    """
+    try:
+        import gwresults  # noqa: F401
+    except ImportError as exc:
+        raise click.ClickException(
+            "gwresults is required for this command: pip install gwresults"
+        ) from exc
+
+    from mitchell.gwtc import build_from_gwtc
+
+    converted = skipped = failed = 0
+    for result in build_from_gwtc(
+        zarr_path,
+        catalogues=list(catalogues) or None,
+        events=list(events) or None,
+        limit=limit,
+        keep_cache=keep_cache,
+    ):
+        click.echo(f"[{result.status}] {result.event_name} {result.detail}".rstrip())
+        if result.status == "converted":
+            converted += 1
+        elif result.status == "skipped":
+            skipped += 1
+        else:
+            failed += 1
+
+    click.echo(f"Done: {converted} converted, {skipped} skipped, {failed} failed.")

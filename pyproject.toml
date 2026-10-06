@@ -25,6 +25,9 @@ cloud = [
     "s3fs >= 2023.1",
     "gcsfs >= 2023.1",
 ]
+gwtc = [
+    "gwresults @ git+https://github.com/transientlunatic/gwresults.git",
+]
 dev = [
     "pytest >= 8.0",
     "pytest-cov",
@@ -38,6 +41,9 @@ docs = [
     "sphinxcontrib-katex",
     "sphinx-autoapi",
 ]
+
+[tool.hatch.metadata]
+allow-direct-references = true
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/mitchell"]

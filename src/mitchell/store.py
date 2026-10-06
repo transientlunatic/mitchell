@@ -28,6 +28,10 @@ def _decode(val: object) -> object:
     """Unwrap length-1 arrays and decode byte strings for zarr attributes."""
     if isinstance(val, np.ndarray) and val.ndim == 1 and len(val) == 1:
         val = val[0]
+    if isinstance(val, np.generic):
+        # e.g. np.int64 isn't JSON-serializable (unlike np.float64, which
+        # subclasses the builtin float); .item() gives the native Python type.
+        val = val.item()
     if isinstance(val, (bytes, np.bytes_)):
         val = val.decode()
     return val
@@ -352,6 +356,13 @@ class MitchellStore:
 
     def __getitem__(self, event_name: str) -> Event:
         return Event(self._root["events"][event_name])
+
+    def __contains__(self, event_name: str) -> bool:
+        return "events" in self._root and event_name in self._root["events"]
+
+    def __delitem__(self, event_name: str) -> None:
+        del self._root["events"][event_name]
+        zarr.consolidate_metadata(self._store)
 
     def __iter__(self) -> Iterator[Event]:
         if "events" not in self._root:
