@@ -124,7 +124,12 @@ class Analysis:
         -------
         arviz.InferenceData
         """
-        import arviz as az
+        try:
+            import arviz as az
+        except ImportError as exc:
+            raise ImportError(
+                "to_arviz() requires arviz: pip install 'mitchell[arviz]'"
+            ) from exc
 
         data: dict[str, dict[str, np.ndarray]] = {}
 
