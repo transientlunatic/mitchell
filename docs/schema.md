@@ -28,7 +28,7 @@ is its executable form.
             │   └── analytic/
             │       └── zarr.json      # {param: "Prior string"} attributes
             ├── psds/
-            │   ├── H1                 # (N, 2) float64  [frequency, ASD]
+            │   ├── H1                 # (N, 2) float64  [frequency, PSD]
             │   └── L1
             ├── calibration_envelope/
             │   ├── H1                 # (300, 7) float64
@@ -42,6 +42,12 @@ is its executable form.
 
 Everything is plain zarr v3.  A reader needs nothing beyond zarr itself to
 read any array or group above once it knows the path.
+
+`psds/{detector}` holds the **power** spectral density in 1/Hz (about 1e-46
+near 100 Hz for LIGO), as PESummary stores it, not the amplitude spectral
+density.  Frequency bins below the analysis's `f_low` are unused and may hold
+placeholder values (0.5 in the GWTC-2.1 GW150914 file) rather than a measured PSD, so
+readers should ignore them.
 
 Event and analysis names are used verbatim as zarr node names.  Analysis
 names commonly contain a colon (`C01:IMRPhenomXPHM`); percent-encode them
