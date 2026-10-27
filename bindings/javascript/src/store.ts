@@ -3,8 +3,9 @@
  *
  * The classes mirror the Python ``mitchell`` package.  All discovery
  * (listing events, analyses, parameter names) is performed synchronously
- * from the consolidated metadata embedded in the root ``zarr.json``; only
- * actual array data loads are asynchronous.
+ * from the ``mitchell_index`` attribute of the root ``zarr.json`` (or, for
+ * schema 0.1.0 stores, its consolidated metadata); only actual array data
+ * loads are asynchronous.
  *
  * @example
  * ```typescript
@@ -24,10 +25,19 @@
 
 import * as zarrita from "zarrita";
 import type { Readable } from "@zarrita/storage";
-import type { AnalysisAttrs, ConsolidatedEntry } from "./types.js";
+import type {
+  AnalysisAttrs,
+  AnalysisIndexEntry,
+  Catalog,
+  ConsolidatedEntry,
+  MitchellIndex,
+} from "./types.js";
 
 type Consolidated = Record<string, ConsolidatedEntry>;
 type RootLocation = zarrita.Location<Readable>;
+
+/** Schema versions (major.minor) this reader understands. */
+const SUPPORTED_SCHEMA_VERSIONS = ["0.1", "0.2"];
 
 const decoder = new TextDecoder();
 
@@ -72,6 +82,54 @@ async function readArray(
   return { data: chunk.data as Float64Array, shape: chunk.shape };
 }
 
+/**
+ * Build a {@link Catalog} from the consolidated metadata of a schema 0.1.0
+ * store, which has no ``mitchell_index``.
+ */
+function catalogFromConsolidated(consolidated: Consolidated): Catalog {
+  const catalog: Catalog = {};
+  const arrayShapes = (path: string): Record<string, number[]> =>
+    Object.fromEntries(
+      childNames(consolidated, path, "array")
+        .sort()
+        .map((n) => [n, consolidated[`${path}/${n}`].shape ?? []]),
+    );
+
+  for (const event of childNames(consolidated, "events", "group").sort()) {
+    catalog[event] = {};
+    const eventPath = `events/${event}`;
+    for (const name of childNames(consolidated, eventPath, "group").sort()) {
+      const path = `${eventPath}/${name}`;
+      const postShapes = arrayShapes(`${path}/posterior/samples`);
+      const entry: AnalysisIndexEntry = {
+        attrs: (consolidated[path].attributes ?? {}) as AnalysisAttrs,
+        posterior: Object.keys(postShapes),
+        psds: arrayShapes(`${path}/psds`),
+        calibration_envelope: arrayShapes(`${path}/calibration_envelope`),
+      };
+      const first = Object.values(postShapes)[0];
+      if (first) entry.n_samples = first[0];
+
+      if (`${path}/priors` in consolidated) {
+        entry.priors = {
+          samples: Object.keys(arrayShapes(`${path}/priors/samples`)),
+          analytic: (consolidated[`${path}/priors/analytic`]?.attributes ??
+            {}) as Record<string, string>,
+        };
+      }
+      if (`${path}/skymap/data` in consolidated) {
+        entry.skymap = {
+          attrs: consolidated[`${path}/skymap`]?.attributes ?? {},
+          shape: consolidated[`${path}/skymap/data`].shape ?? [],
+        };
+      }
+      if (`${path}/config_file` in consolidated) entry.config_file = true;
+      catalog[event][name] = entry;
+    }
+  }
+  return catalog;
+}
+
 // ---------------------------------------------------------------------------
 // Data products
 // ---------------------------------------------------------------------------
@@ -79,8 +137,7 @@ async function readArray(
 /**
  * Columnar posterior sample arrays for one analysis.
  *
- * Parameter names are available synchronously from the consolidated
- * metadata; the underlying float64 data is loaded lazily on demand.
+ * Parameter names are available synchronously from the store index; the underlying float64 data is loaded lazily on demand.
  */
 export class PosteriorSamples {
   /** @internal */
@@ -168,13 +225,12 @@ class DetectorArrays {
   constructor(
     private readonly rootLoc: RootLocation,
     private readonly basePath: string,
-    private readonly detectors: readonly string[],
-    private readonly consolidated: Consolidated,
+    private readonly shapes: Readonly<Record<string, number[]>>,
   ) {}
 
   /** Names of all detectors that have an array stored. */
   detectorNames(): string[] {
-    return [...this.detectors];
+    return Object.keys(this.shapes);
   }
 
   /**
@@ -184,13 +240,11 @@ class DetectorArrays {
    * @throws If ``detector`` is not in {@link detectorNames}.
    */
   async get(detector: string): Promise<Array2D> {
-    if (!this.detectors.includes(detector)) {
+    if (!(detector in this.shapes)) {
       throw new Error(`Detector not found: ${detector}`);
     }
-    const path = `${this.basePath}/${detector}`;
-    const { data } = await readArray(this.rootLoc, path);
-    const shape = this.consolidated[path].shape as [number, number];
-    return { data, shape };
+    const { data } = await readArray(this.rootLoc, `${this.basePath}/${detector}`);
+    return { data, shape: this.shapes[detector] as [number, number] };
   }
 }
 
@@ -261,9 +315,20 @@ export class Analysis {
     readonly calibrationEnvelope: CalibrationEnvelope | null,
     /** HEALPix skymap, or ``null`` if not stored. */
     readonly skymap: Skymap | null,
-    /** Config file key-value pairs as a plain object. */
-    readonly config: Record<string, unknown>,
+    /** Whether a config file is stored; see {@link getConfig}. */
+    readonly hasConfig: boolean,
+    private readonly loadConfig: () => Promise<Record<string, unknown>>,
   ) {}
+
+  /**
+   * The analysis's config file as a key-value object (``{}`` if none).
+   *
+   * Loaded on demand rather than listed in the store index, because config
+   * files are comparatively large.
+   */
+  async getConfig(): Promise<Record<string, unknown>> {
+    return this.hasConfig ? this.loadConfig() : {};
+  }
 
   toString(): string {
     return `Analysis("${this.name}")`;
@@ -272,71 +337,63 @@ export class Analysis {
 
 function buildAnalysis(
   rootLoc: RootLocation,
-  consolidated: Consolidated,
   analysisPath: string,
+  entry: AnalysisIndexEntry,
 ): Analysis {
   const name = analysisPath.split("/").at(-1)!;
-  const attrs = (consolidated[analysisPath]?.attributes ?? {}) as AnalysisAttrs;
 
   const postSamplesPath = `${analysisPath}/posterior/samples`;
-  const postParams = childNames(consolidated, postSamplesPath, "array");
   const posterior =
-    postParams.length > 0
-      ? new PosteriorSamples(rootLoc, postSamplesPath, postParams)
+    entry.posterior.length > 0
+      ? new PosteriorSamples(rootLoc, postSamplesPath, entry.posterior)
       : null;
 
-  const priorsPath = `${analysisPath}/priors`;
-  let priors: Priors | null = null;
-  if (priorsPath in consolidated) {
-    const priorParams = childNames(
-      consolidated,
-      `${priorsPath}/samples`,
-      "array",
-    );
-    const analyticPath = `${priorsPath}/analytic`;
-    const analyticAttrs = (
-      analyticPath in consolidated ? consolidated[analyticPath].attributes : {}
-    ) as Record<string, string>;
-    priors = new Priors(rootLoc, priorsPath, priorParams, analyticAttrs);
-  }
+  const priors = entry.priors
+    ? new Priors(
+        rootLoc,
+        `${analysisPath}/priors`,
+        entry.priors.samples,
+        entry.priors.analytic,
+      )
+    : null;
 
-  const psdsPath = `${analysisPath}/psds`;
-  const psdDetectors = childNames(consolidated, psdsPath, "array");
-  const psds =
-    psdDetectors.length > 0
-      ? new PSDs(rootLoc, psdsPath, psdDetectors, consolidated)
-      : null;
+  const detectors = (shapes: Record<string, number[]> | undefined) =>
+    shapes && Object.keys(shapes).length > 0 ? shapes : null;
+  const psdShapes = detectors(entry.psds);
+  const psds = psdShapes
+    ? new PSDs(rootLoc, `${analysisPath}/psds`, psdShapes)
+    : null;
+  const calShapes = detectors(entry.calibration_envelope);
+  const calibrationEnvelope = calShapes
+    ? new CalibrationEnvelope(
+        rootLoc,
+        `${analysisPath}/calibration_envelope`,
+        calShapes,
+      )
+    : null;
 
-  const calPath = `${analysisPath}/calibration_envelope`;
-  const calDetectors = childNames(consolidated, calPath, "array");
-  const calibrationEnvelope =
-    calDetectors.length > 0
-      ? new CalibrationEnvelope(rootLoc, calPath, calDetectors, consolidated)
-      : null;
-
-  const skymapPath = `${analysisPath}/skymap`;
-  const skymap =
-    `${skymapPath}/data` in consolidated
-      ? new Skymap(
-          rootLoc,
-          skymapPath,
-          consolidated[skymapPath]?.attributes ?? {},
-        )
-      : null;
+  const skymap = entry.skymap
+    ? new Skymap(rootLoc, `${analysisPath}/skymap`, entry.skymap.attrs)
+    : null;
 
   const configPath = `${analysisPath}/config_file`;
-  const config =
-    configPath in consolidated ? consolidated[configPath].attributes : {};
+  const loadConfig = async () => {
+    const group = await zarrita.open(rootLoc.resolve(configPath), {
+      kind: "group",
+    });
+    return group.attrs as Record<string, unknown>;
+  };
 
   return new Analysis(
     name,
-    attrs,
+    entry.attrs ?? {},
     posterior,
     priors,
     psds,
     calibrationEnvelope,
     skymap,
-    config,
+    entry.config_file === true,
+    loadConfig,
   );
 }
 
@@ -351,14 +408,16 @@ export class Event {
   /** @internal */
   constructor(
     private readonly rootLoc: RootLocation,
-    private readonly consolidated: Consolidated,
+    private readonly analysisEntries: Readonly<
+      Record<string, AnalysisIndexEntry>
+    >,
     /** Event name, e.g. ``"GW150914_095045"``. */
     readonly name: string,
   ) {}
 
   /** Names of all analyses stored for this event. */
   analysisNames(): string[] {
-    return childNames(this.consolidated, `events/${this.name}`, "group");
+    return Object.keys(this.analysisEntries);
   }
 
   /** Total number of analyses stored for this event. */
@@ -373,21 +432,21 @@ export class Event {
    * @throws If the analysis is not found.
    */
   async get(analysisName: string): Promise<Analysis> {
-    const path = `events/${this.name}/${analysisName}`;
-    if (!(path in this.consolidated)) {
+    const entry = this.analysisEntries[analysisName];
+    if (!entry) {
       throw new Error(`Analysis not found: ${analysisName}`);
     }
-    return buildAnalysis(this.rootLoc, this.consolidated, path);
+    return buildAnalysis(
+      this.rootLoc,
+      `events/${this.name}/${analysisName}`,
+      entry,
+    );
   }
 
   /** Async-iterate over all analyses for this event. */
   async *analyses(): AsyncGenerator<Analysis> {
     for (const name of this.analysisNames()) {
-      yield buildAnalysis(
-        this.rootLoc,
-        this.consolidated,
-        `events/${this.name}/${name}`,
-      );
+      yield this.get(name);
     }
   }
 
@@ -409,12 +468,12 @@ export class Event {
  * for HTTP/cloud access use zarrita's built-in ``FetchStore``.
  *
  * Discovery (listing events and analyses) is performed synchronously
- * using consolidated metadata loaded at open time.
+ * using the index loaded at open time.
  */
 export class MitchellStore {
   private constructor(
     private readonly rootLoc: RootLocation,
-    private readonly consolidated: Consolidated,
+    private readonly catalog: Catalog,
     /** The Mitchell schema version of this store. */
     readonly schemaVersion: string,
   ) {}
@@ -422,14 +481,17 @@ export class MitchellStore {
   /**
    * Open a Mitchell store from any zarrita-compatible store object.
    *
-   * Reads and parses the root ``zarr.json`` (including consolidated
-   * metadata) in a single request.
+   * Reads and parses the root ``zarr.json`` in a single request.  Its
+   * ``mitchell_index`` attribute (schema 0.2) lists every event, analysis and
+   * data product; stores written with schema 0.1 are listed from their
+   * consolidated metadata instead.
    *
    * @param store  Any {@link Readable} store: ``FileSystemStore`` (Node.js),
    *               ``zarrita.FetchStore`` (browser/HTTP), or an in-memory
    *               ``Map<string, Uint8Array>``.
    * @throws If ``/zarr.json`` is absent, the node is not a zarr v3 group,
-   *         or ``mitchell_schema_version`` is missing from root attributes.
+   *         ``mitchell_schema_version`` is missing or unsupported, or the
+   *         root carries neither an index nor consolidated metadata.
    */
   static async open(store: Readable): Promise<MitchellStore> {
     const rootMeta = await readRootJson(store);
@@ -446,14 +508,35 @@ export class MitchellStore {
         "Not a Mitchell store: mitchell_schema_version attribute not found in root",
       );
     }
+    const majorMinor = version.split(".").slice(0, 2).join(".");
+    if (!SUPPORTED_SCHEMA_VERSIONS.includes(majorMinor)) {
+      throw new Error(
+        `Unsupported Mitchell schema version ${version} ` +
+          `(this reader supports ${SUPPORTED_SCHEMA_VERSIONS.join(", ")})`,
+      );
+    }
 
-    const consolidated = rootMeta.consolidated_metadata?.metadata ?? {};
-    return new MitchellStore(zarrita.root(store), consolidated, version);
+    const index = rootMeta.attributes?.mitchell_index as
+      | MitchellIndex
+      | undefined;
+    const consolidated = rootMeta.consolidated_metadata?.metadata;
+    let catalog: Catalog;
+    if (index) {
+      catalog = index.events ?? {};
+    } else if (consolidated) {
+      catalog = catalogFromConsolidated(consolidated);
+    } else {
+      throw new Error(
+        "Cannot list the store: root zarr.json has neither a mitchell_index " +
+          "attribute nor consolidated metadata (run `mitchell reindex`)",
+      );
+    }
+    return new MitchellStore(zarrita.root(store), catalog, version);
   }
 
-  /** Names of all events in the store (from consolidated metadata). */
+  /** Names of all events in the store. */
   eventNames(): string[] {
-    return childNames(this.consolidated, "events", "group");
+    return Object.keys(this.catalog);
   }
 
   /** Total number of events in the store. */
@@ -468,16 +551,17 @@ export class MitchellStore {
    * @throws If the event is not found.
    */
   async get(eventName: string): Promise<Event> {
-    if (!this.eventNames().includes(eventName)) {
+    const analyses = this.catalog[eventName];
+    if (!analyses) {
       throw new Error(`Event not found: ${eventName}`);
     }
-    return new Event(this.rootLoc, this.consolidated, eventName);
+    return new Event(this.rootLoc, analyses, eventName);
   }
 
   /** Async-iterate over all events in the store. */
   async *events(): AsyncGenerator<Event> {
     for (const name of this.eventNames()) {
-      yield new Event(this.rootLoc, this.consolidated, name);
+      yield this.get(name);
     }
   }
 

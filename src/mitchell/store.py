@@ -57,6 +57,67 @@ def _as_group(node: object, path: str) -> zarr.Group:
     return node
 
 
+def _subgroup(group: zarr.Group, key: str) -> zarr.Group | None:
+    """Return ``group[key]`` if it exists (and is a group), else None."""
+    return _as_group(group[key], key) if key in group else None
+
+
+def _array_shapes(group: zarr.Group | None) -> dict[str, list[int]]:
+    """``{name: shape}`` for every array directly inside *group*."""
+    if group is None:
+        return {}
+    return {k: list(group[k].shape) for k in sorted(group.array_keys())}  # type: ignore[union-attr]
+
+
+def _analysis_index_entry(group: zarr.Group) -> dict[str, Any]:
+    """Summarise one analysis group for the root ``mitchell_index``.
+
+    Holds everything needed to *list* what a store contains without further
+    requests: names and shapes of the data products plus the small attribute
+    blocks.  Bulk arrays and the (larger) config file are not copied.
+    """
+    entry: dict[str, Any] = {"attrs": dict(group.attrs)}
+
+    posterior = _subgroup(group, "posterior")
+    samples = _subgroup(posterior, "samples") if posterior is not None else None
+    shapes = _array_shapes(samples)
+    entry["posterior"] = sorted(shapes)
+    if shapes:
+        entry["n_samples"] = next(iter(shapes.values()))[0]
+
+    priors = _subgroup(group, "priors")
+    if priors is not None:
+        prior_samples = _subgroup(priors, "samples")
+        analytic = _subgroup(priors, "analytic")
+        entry["priors"] = {
+            "samples": sorted(_array_shapes(prior_samples)),
+            "analytic": dict(analytic.attrs) if analytic is not None else {},
+        }
+
+    entry["psds"] = _array_shapes(_subgroup(group, "psds"))
+    entry["calibration_envelope"] = _array_shapes(
+        _subgroup(group, "calibration_envelope")
+    )
+
+    skymap = _subgroup(group, "skymap")
+    if skymap is not None and "data" in skymap:
+        entry["skymap"] = {
+            "attrs": dict(skymap.attrs),
+            "shape": list(skymap["data"].shape),  # type: ignore[union-attr]
+        }
+
+    if "config_file" in group:
+        entry["config_file"] = True
+    return entry
+
+
+def _event_index_entry(group: zarr.Group) -> dict[str, Any]:
+    return {
+        key: _analysis_index_entry(_as_group(group[key], key))
+        for key in sorted(group.group_keys())
+    }
+
+
 def _columnar_to_dict(group: zarr.Group) -> dict[str, np.ndarray]:
     """Return {param: array} for every array dataset in *group*."""
     return {k: np.asarray(group[k][:]) for k in group.array_keys()}  # type: ignore[index]
@@ -194,10 +255,22 @@ class Event:
     ----------
     group:
         The zarr group at ``events/{event_name}``.
+    analysis_names:
+        Analysis names already known from the store index.  When omitted
+        they are discovered by listing the group, which not every store
+        backend (e.g. plain HTTP) supports.
     """
 
-    def __init__(self, group: zarr.Group) -> None:
+    def __init__(
+        self, group: zarr.Group, analysis_names: list[str] | None = None
+    ) -> None:
         self._group = group
+        self._names = analysis_names
+
+    def _analysis_names(self) -> list[str]:
+        if self._names is not None:
+            return list(self._names)
+        return sorted(self._group.group_keys())
 
     @property
     def name(self) -> str:
@@ -207,11 +280,11 @@ class Event:
         return Analysis(_as_group(self._group[analysis_name], analysis_name))
 
     def __iter__(self) -> Iterator[Analysis]:
-        for key in self._group.group_keys():
+        for key in self._analysis_names():
             yield Analysis(_as_group(self._group[key], key))
 
     def __len__(self) -> int:
-        return sum(1 for _ in self._group.group_keys())
+        return len(self._analysis_names())
 
     def __repr__(self) -> str:
         names = [a.name for a in self]
@@ -239,7 +312,8 @@ class MitchellStore:
         ``"a"`` to open existing or create, ``"w"`` to overwrite.
     """
 
-    SCHEMA_VERSION = "0.1.0"
+    SCHEMA_VERSION = "0.2.0"
+    INDEX_ATTR = "mitchell_index"
 
     def __init__(
         self,
@@ -247,9 +321,71 @@ class MitchellStore:
         mode: Mode = "a",
     ) -> None:
         self._store = store
-        self._root = zarr.open_group(store=store, mode=mode)
+        # Consolidated metadata (written by schema 0.1.0) is not part of the
+        # zarr v3 spec and goes stale as soon as the store is appended to, so
+        # never trust it; the root ``mitchell_index`` replaces it.
+        self._root = zarr.open_group(store=store, mode=mode, use_consolidated=False)
         if mode != "r" and "mitchell_schema_version" not in self._root.attrs:
-            self._root.attrs["mitchell_schema_version"] = self.SCHEMA_VERSION
+            self._root.attrs.update(
+                {
+                    "mitchell_schema_version": self.SCHEMA_VERSION,
+                    self.INDEX_ATTR: {"events": {}},
+                }
+            )
+
+    # -- schema version and index -------------------------------------------
+
+    @property
+    def schema_version(self) -> str | None:
+        """The ``mitchell_schema_version`` recorded in the store root."""
+        version = self._root.attrs.get("mitchell_schema_version")
+        return str(version) if version is not None else None
+
+    def _index(self) -> dict[str, Any] | None:
+        """The root event index, or None for a store written before 0.2.0."""
+        index = self._root.attrs.get(self.INDEX_ATTR)
+        return index if isinstance(index, dict) else None
+
+    def rebuild_index(self) -> None:
+        """(Re)build the root ``mitchell_index`` by scanning every event.
+
+        Also upgrades a schema 0.1.0 store in place: the stale consolidated
+        metadata is dropped and the schema version is bumped.  Needs a store
+        that can list its groups, so run it on local storage.
+        """
+        events: dict[str, Any] = {}
+        if "events" in self._root:
+            for name in sorted(self._events.group_keys()):
+                events[name] = _event_index_entry(_as_group(self._events[name], name))
+        self._root.attrs.update(
+            {
+                "mitchell_schema_version": self.SCHEMA_VERSION,
+                self.INDEX_ATTR: {"events": events},
+            }
+        )
+
+    def _update_index(self, event_name: str) -> None:
+        """Refresh the index entry for *event_name* (drop it if the event is gone)."""
+        index = self._index()
+        if index is None:
+            self.rebuild_index()
+            return
+        events = dict(index.get("events", {}))
+        if event_name in self:
+            events[event_name] = _event_index_entry(
+                _as_group(self._events[event_name], event_name)
+            )
+        else:
+            events.pop(event_name, None)
+        self._root.attrs[self.INDEX_ATTR] = {"events": dict(sorted(events.items()))}
+
+    def _event_names(self) -> list[str]:
+        index = self._index()
+        if index is not None:
+            return sorted(index.get("events", {}))
+        if "events" not in self._root:
+            return []
+        return sorted(self._events.group_keys())
 
     # -- constructors -------------------------------------------------------
 
@@ -374,7 +510,7 @@ class MitchellStore:
                             }
                         )
 
-        zarr.consolidate_metadata(instance._store)
+        instance._update_index(event_name)
         return instance
 
     # -- event access -------------------------------------------------------
@@ -383,26 +519,31 @@ class MitchellStore:
     def _events(self) -> zarr.Group:
         return _as_group(self._root["events"], "events")
 
+    def _event(self, event_name: str) -> Event:
+        index = self._index()
+        names = None
+        if index is not None and event_name in index.get("events", {}):
+            names = sorted(index["events"][event_name])
+        return Event(_as_group(self._events[event_name], event_name), names)
+
     def __getitem__(self, event_name: str) -> Event:
-        return Event(_as_group(self._events[event_name], event_name))
+        return self._event(event_name)
 
     def __contains__(self, event_name: str) -> bool:
+        # Checks the group itself, not the index, so a half-written event
+        # (written but not yet indexed) is still found and can be cleaned up.
         return "events" in self._root and event_name in self._events
 
     def __delitem__(self, event_name: str) -> None:
         del self._events[event_name]
-        zarr.consolidate_metadata(self._store)
+        self._update_index(event_name)
 
     def __iter__(self) -> Iterator[Event]:
-        if "events" not in self._root:
-            return
-        for key in self._events.group_keys():
-            yield Event(_as_group(self._events[key], key))
+        for name in self._event_names():
+            yield self._event(name)
 
     def __len__(self) -> int:
-        if "events" not in self._root:
-            return 0
-        return sum(1 for _ in self._events.group_keys())
+        return len(self._event_names())
 
     def __repr__(self) -> str:
         n = len(self)

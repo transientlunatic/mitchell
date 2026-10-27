@@ -1,7 +1,11 @@
 """Regenerate the cross-language conformance fixture.
 
-Writes ``store.zarr`` (a tiny Mitchell store) and ``expected.json`` (what every
-language binding must read back from it) next to this script::
+Writes next to this script::
+
+    store.zarr        a tiny current-schema store (root ``mitchell_index``)
+    store_v0_1.zarr   the same data in the schema 0.1.0 layout (consolidated
+                      metadata, no index) so readers keep their legacy path
+    expected.json     what every language binding must read back from either
 
     python tests/conformance/make_fixture.py
 
@@ -19,8 +23,11 @@ from pathlib import Path
 import numpy as np
 import zarr
 
+from mitchell import MitchellStore
+
 HERE = Path(__file__).parent
 STORE = HERE / "store.zarr"
+LEGACY_STORE = HERE / "store_v0_1.zarr"
 EXPECTED = HERE / "expected.json"
 
 N_SAMPLES = 64
@@ -37,14 +44,19 @@ def _summary(arr: np.ndarray) -> dict:
     }
 
 
-def build() -> dict:
+def build(path: Path, legacy: bool) -> dict:
+    """Write the fixture to *path*; return what readers must see in it."""
     rng = np.random.default_rng(20150914)
-    if STORE.exists():
-        shutil.rmtree(STORE)
-    root = zarr.open_group(store=zarr.storage.LocalStore(STORE), mode="w")
+    if path.exists():
+        shutil.rmtree(path)
+    root = zarr.open_group(store=zarr.storage.LocalStore(path), mode="w")
     root.attrs["mitchell_schema_version"] = "0.1.0"
 
-    expected: dict = {"schema_version": "0.1.0", "events": {}}
+    expected: dict = {
+        "schema_version": "0.2.0",
+        "legacy_schema_version": "0.1.0",
+        "events": {},
+    }
 
     # Two events; the first has two analyses, the second just one.
     layout = {
@@ -111,10 +123,15 @@ def build() -> dict:
             exp_event[analysis_name] = exp
         expected["events"][event_name] = exp_event
 
-    zarr.consolidate_metadata(root.store)
+    if legacy:
+        zarr.consolidate_metadata(root.store)
+    else:
+        MitchellStore.open(path, mode="r+").rebuild_index()
     return expected
 
 
 if __name__ == "__main__":
-    EXPECTED.write_text(json.dumps(build(), indent=2) + "\n")
-    print(f"wrote {STORE} and {EXPECTED}")
+    expected = build(STORE, legacy=False)
+    assert build(LEGACY_STORE, legacy=True) == expected
+    EXPECTED.write_text(json.dumps(expected, indent=2) + "\n")
+    print(f"wrote {STORE}, {LEGACY_STORE} and {EXPECTED}")

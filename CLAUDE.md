@@ -43,6 +43,10 @@ mypy src/mitchell
 
 - **Python ≥ 3.11**, zarr ≥ 3.0 (zarr v3 format throughout).
 - `src/` layout — package root is `src/mitchell/`.
+- Events and analyses are listed through the root `mitchell_index` attribute
+  (`docs/schema.md`); zarr consolidated metadata is deliberately *not* used
+  (not in the zarr v3 spec).  Anything that changes the tree must update the
+  index.
 - The zarr store schema is the stability contract; all language bindings must
   conform to it.  Document schema changes clearly.
 - Dual-licensed MIT.

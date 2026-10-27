@@ -101,6 +101,24 @@ def _run_batch(files: list[Path], zarr_path: str, overwrite: bool) -> None:
         _run_single(h5_path, event_name, zarr_path, mode)
 
 
+@cli.command("reindex")
+@click.argument("zarr_path", type=click.Path(exists=True))
+def reindex(zarr_path: str) -> None:
+    """Rebuild the event index of ZARR_PATH, upgrading it to the current schema.
+
+    Use this on a store written before schema 0.2.0 (which relied on zarr
+    consolidated metadata) or one whose index is out of date.  The store must
+    be on a filesystem that can list directories.
+    """
+    store = MitchellStore.open(zarr_path, mode="r+")
+    previous = store.schema_version
+    store.rebuild_index()
+    click.echo(
+        f"Indexed {len(store)} event(s) in {zarr_path} "
+        f"(schema {previous} -> {store.schema_version})."
+    )
+
+
 @cli.command("from-gwtc")
 @click.argument("zarr_path", type=click.Path())
 @click.option(

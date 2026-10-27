@@ -1,0 +1,8 @@
+{
+  "attributes": {
+    "nside": 2,
+    "ordering": "NESTED"
+  },
+  "zarr_format": 3,
+  "node_type": "group"
+}

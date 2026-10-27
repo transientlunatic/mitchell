@@ -28,13 +28,21 @@ function check(data: ArrayLike<number>, shape: number[] | undefined, exp: Summar
   expect(Math.abs(sum - exp.sum)).toBeLessThanOrEqual(1e-9 * Math.max(1, Math.abs(exp.sum)));
 }
 
-const open = () =>
-  MitchellStore.open(new FileSystemStore(join(CONFORMANCE, "store.zarr")));
+// The current layout (root mitchell_index) and the frozen schema 0.1.0 layout
+// (consolidated metadata, no index) must read back identical data.
+const LAYOUTS = [
+  { dir: "store.zarr", version: expected.schema_version },
+  { dir: "store_v0_1.zarr", version: expected.legacy_schema_version },
+];
 
-describe("conformance fixture", () => {
+for (const layout of LAYOUTS) {
+describe(`conformance fixture (${layout.dir})`, () => {
+  const open = () =>
+    MitchellStore.open(new FileSystemStore(join(CONFORMANCE, layout.dir)));
+
   it("lists events and schema version", async () => {
     const ms = await open();
-    expect(ms.schemaVersion).toBe(expected.schema_version);
+    expect(ms.schemaVersion).toBe(layout.version);
     expect([...ms.eventNames()].sort()).toEqual(Object.keys(expected.events).sort());
   });
 
@@ -77,21 +85,74 @@ describe("conformance fixture", () => {
           const sky = await a.skymap!.getData();
           check(sky, [sky.length], exp.skymap.data);
 
-          expect(a.config).toEqual(exp.config);
+          expect(a.hasConfig).toBe(true);
+          expect(await a.getConfig()).toEqual(exp.config);
         });
       }
     });
   }
 
+});
+}
+
+const rootOnly = (root: object) =>
+  new Map<string, Uint8Array>([
+    ["/zarr.json", new TextEncoder().encode(JSON.stringify(root))],
+  ]) as any;
+const group = (attributes: object, extra: object = {}) => ({
+  zarr_format: 3,
+  node_type: "group",
+  attributes,
+  ...extra,
+});
+
+describe("opening a store", () => {
   it("rejects a store without a schema version", async () => {
-    const empty = new Map<string, Uint8Array>([
-      [
-        "/zarr.json",
-        new TextEncoder().encode(
-          JSON.stringify({ zarr_format: 3, node_type: "group", attributes: {} }),
+    await expect(MitchellStore.open(rootOnly(group({})))).rejects.toThrow(
+      /mitchell_schema_version/,
+    );
+  });
+
+  it("rejects an unsupported schema version", async () => {
+    await expect(
+      MitchellStore.open(rootOnly(group({ mitchell_schema_version: "0.9.0" }))),
+    ).rejects.toThrow(/Unsupported Mitchell schema version 0.9.0/);
+  });
+
+  it("explains how to fix a store with neither index nor consolidated metadata", async () => {
+    await expect(
+      MitchellStore.open(rootOnly(group({ mitchell_schema_version: "0.2.0" }))),
+    ).rejects.toThrow(/mitchell reindex/);
+  });
+
+  it("opens an empty indexed store", async () => {
+    const ms = await MitchellStore.open(
+      rootOnly(
+        group({ mitchell_schema_version: "0.2.0", mitchell_index: { events: {} } }),
+      ),
+    );
+    expect(ms.eventNames()).toEqual([]);
+    expect(ms.toString()).toBe("MitchellStore(0 events)");
+  });
+
+  it("prefers the index over stale consolidated metadata", async () => {
+    const stale = {
+      metadata: {
+        events: group({}),
+        "events/OLD": group({}),
+      },
+    };
+    const ms = await MitchellStore.open(
+      rootOnly(
+        group(
+          {
+            mitchell_schema_version: "0.2.0",
+            mitchell_index: { events: { NEW: {} } },
+          },
+          { consolidated_metadata: stale },
         ),
-      ],
-    ]);
-    await expect(MitchellStore.open(empty as any)).rejects.toThrow(/mitchell_schema_version/);
+      ),
+    );
+    expect(ms.eventNames()).toEqual(["NEW"]);
   });
 });

@@ -5,6 +5,7 @@ The same fixture (``tests/conformance/store.zarr``) and expectations
 """
 
 import json
+import shutil
 from pathlib import Path
 
 import numpy as np
@@ -24,14 +25,27 @@ def _check(arr, exp) -> None:
     np.testing.assert_allclose(flat.sum(), exp["sum"], rtol=1e-9)
 
 
-@pytest.fixture(scope="module")
-def store() -> MitchellStore:
-    return MitchellStore.open(CONFORMANCE / "store.zarr", mode="r")
+@pytest.fixture(scope="module", params=["store.zarr", "store_v0_1.zarr"])
+def store(request) -> MitchellStore:
+    """The current-schema fixture and the frozen schema 0.1.0 layout."""
+    return MitchellStore.open(CONFORMANCE / request.param, mode="r")
 
 
 def test_events(store) -> None:
     assert sorted(e.name for e in store) == sorted(EXPECTED["events"])
-    assert store._root.attrs["mitchell_schema_version"] == EXPECTED["schema_version"]
+    legacy = store._index() is None
+    expected_version = EXPECTED["legacy_schema_version" if legacy else "schema_version"]
+    assert store.schema_version == expected_version
+
+
+def test_committed_index_is_current(tmp_path) -> None:
+    """Rebuilding the index from the arrays reproduces the committed one."""
+    copy = tmp_path / "store.zarr"
+    shutil.copytree(CONFORMANCE / "store.zarr", copy)
+    rebuilt = MitchellStore.open(copy, mode="r+")
+    rebuilt.rebuild_index()
+    committed = MitchellStore.open(CONFORMANCE / "store.zarr", mode="r")
+    assert rebuilt._index() == committed._index()
 
 
 @pytest.mark.parametrize(

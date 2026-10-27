@@ -1,0 +1,12 @@
+{
+  "attributes": {
+    "approximant": "IMRPhenomD_NRTidalv2",
+    "f_low": 20.0,
+    "f_ref": 20.0,
+    "sampling_frequency": 2048,
+    "time_marginalization": false,
+    "reference_frame": "H1L1"
+  },
+  "zarr_format": 3,
+  "node_type": "group"
+}
