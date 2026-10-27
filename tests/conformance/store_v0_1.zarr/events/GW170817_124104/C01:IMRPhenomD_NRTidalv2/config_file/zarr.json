@@ -1,0 +1,8 @@
+{
+  "attributes": {
+    "sampler": "dynesty",
+    "nlive": 1000
+  },
+  "zarr_format": 3,
+  "node_type": "group"
+}

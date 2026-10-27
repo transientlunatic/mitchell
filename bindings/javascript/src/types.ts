@@ -62,3 +62,34 @@ export interface ArrayChunk {
   shape: number[];
   stride: number[];
 }
+
+/** Names and shapes of one analysis's data products, as listed in the index. */
+export interface AnalysisIndexEntry {
+  /** The analysis group's attributes. */
+  attrs: AnalysisAttrs;
+  /** Posterior parameter names. */
+  posterior: string[];
+  /** Number of posterior samples, when there is a posterior. */
+  n_samples?: number;
+  priors?: {
+    /** Names of the sampled prior parameters. */
+    samples: string[];
+    /** Parameter name -> prior description string. */
+    analytic: Record<string, string>;
+  };
+  /** Detector name -> array shape. */
+  psds: Record<string, number[]>;
+  /** Detector name -> array shape. */
+  calibration_envelope: Record<string, number[]>;
+  skymap?: { attrs: Record<string, unknown>; shape: number[] };
+  /** Whether a ``config_file`` group exists (its contents are loaded lazily). */
+  config_file?: boolean;
+}
+
+/** event name -> analysis name -> entry. */
+export type Catalog = Record<string, Record<string, AnalysisIndexEntry>>;
+
+/** The ``mitchell_index`` attribute on the store root (schema >= 0.2.0). */
+export interface MitchellIndex {
+  events: Catalog;
+}
