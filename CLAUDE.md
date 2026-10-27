@@ -51,4 +51,8 @@ mypy src/mitchell
   conform to it.  Document schema changes clearly.
 - `scripts/build_demo_store.py` trims a PESummary metafile into a small store
   (used for the viewer's committed GW150914 demo).
+- `mitchell condor-dag` (`src/mitchell/condor.py`) writes an HTCondor DAG that
+  converts events in parallel into per-event stores, merged by
+  `mitchell combine` (`MitchellStore.merge`).  No HTCondor is available in the
+  dev environment: the tests parse the generated files and *emulate* the DAG.
 - Dual-licensed MIT.

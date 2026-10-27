@@ -10,6 +10,7 @@ backed by `zarr <https://zarr.dev>`_.
 
    quickstart.md
    schema.md
+   condor.md
 
 .. toctree::
    :maxdepth: 1

@@ -52,3 +52,36 @@ Usage: mitchell reindex ZARR_PATH
 mitchell reindex old-catalogue.zarr
 # Indexed 42 event(s) in old-catalogue.zarr (schema 0.1.0 -> 0.2.0).
 ```
+
+## `mitchell combine`
+
+Merge Mitchell stores into a catalogue (for example the per-event stores built by
+a Condor DAG).
+
+```
+Usage: mitchell combine [OPTIONS] ZARR_PATH [PARTS]...
+
+Options:
+  --parts-dir DIRECTORY           A directory whose *.zarr subdirectories are
+                                  the parts to merge.
+  --on-conflict [skip|replace|error]
+                                  What to do with an event already in
+                                  ZARR_PATH.  [default: skip]
+  --move / --copy                 Move events out of the parts instead of
+                                  copying them.
+```
+
+## `mitchell condor-dag`
+
+Write an HTCondor DAG that builds a catalogue in parallel.  See
+[Building a catalogue with HTCondor](condor.md) for the full description.
+
+```bash
+mitchell condor-dag dag/ catalogue.zarr --h5-dir /path/to/metafiles
+mitchell condor-dag dag/ catalogue.zarr --gwtc --gwtc-catalogue GWTC-2.1
+```
+
+## Exit status
+
+`mitchell from-gwtc` tries every event it is given, then exits with status 1 if
+any failed, so that a scheduler can detect and retry the failure.

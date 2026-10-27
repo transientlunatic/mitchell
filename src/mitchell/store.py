@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import os
-from collections.abc import Iterator, Mapping
+import shutil
+from collections.abc import Iterable, Iterator, Mapping
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
@@ -18,6 +20,7 @@ if TYPE_CHECKING:
 # ---------------------------------------------------------------------------
 
 Mode = Literal["r", "r+", "a", "w", "w-"]
+OnConflict = Literal["skip", "replace", "error"]
 
 _META_ATTRS = [
     "approximant",
@@ -135,6 +138,15 @@ def _event_index_entry(group: zarr.Group) -> dict[str, Any]:
 def _columnar_to_dict(group: zarr.Group) -> dict[str, np.ndarray]:
     """Return {param: array} for every array dataset in *group*."""
     return {k: np.asarray(group[k][:]) for k in group.array_keys()}  # type: ignore[index]
+
+
+@dataclass
+class MergeResult:
+    """What :meth:`MitchellStore.merge` did, by event name."""
+
+    added: list[str] = field(default_factory=list)
+    replaced: list[str] = field(default_factory=list)
+    skipped: list[str] = field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------
@@ -392,6 +404,99 @@ class MitchellStore:
         else:
             events.pop(event_name, None)
         self._root.attrs[self.INDEX_ATTR] = {"events": dict(sorted(events.items()))}
+
+    def merge(
+        self,
+        parts: Iterable[str | os.PathLike[str]],
+        on_conflict: OnConflict = "skip",
+        move: bool = False,
+    ) -> MergeResult:
+        """Merge the events of other Mitchell stores into this one.
+
+        This is how a catalogue is assembled from stores built independently
+        (one per event, say, by parallel jobs): an event is a directory tree, so
+        merging moves or copies it into place and writes this store's index
+        once, from the parts' own indexes, instead of re-scanning anything.
+
+        Parameters
+        ----------
+        parts:
+            Paths of local Mitchell stores.
+        on_conflict:
+            What to do when an event is already in this store: ``"skip"`` it
+            (the default, so a merge can be re-run), ``"replace"`` it, or
+            ``"error"`` out before changing anything.
+        move:
+            Move event directories out of the parts instead of copying them
+            (a rename on the same filesystem, so no second copy of the data).
+            A part left with no events is removed.
+
+        Both this store and the parts must be on the local filesystem.
+        """
+        if not isinstance(self._store, zarr.storage.LocalStore):
+            raise TypeError("merge() needs a store on the local filesystem")
+        target_events = Path(self._store.root) / "events"
+
+        part_stores: list[tuple[Path, MitchellStore]] = []
+        for part in parts:
+            try:
+                opened = MitchellStore.open(part, mode="r")
+            except Exception as exc:
+                raise ValueError(f"{part} is not a Mitchell store: {exc}") from exc
+            if opened.schema_version is None:
+                raise ValueError(f"{part} is not a Mitchell store (no schema version)")
+            part_stores.append((Path(part), opened))
+
+        if on_conflict == "error":
+            clashes = [
+                name
+                for _, opened in part_stores
+                for name in opened._event_names()
+                if name in self
+            ]
+            if clashes:
+                raise ValueError(
+                    f"{len(clashes)} event(s) already in the store: "
+                    + ", ".join(sorted(set(clashes))[:5])
+                )
+
+        result = MergeResult()
+        entries: dict[str, Any] = {}
+        self._root.require_group("events")
+        for path, opened in part_stores:
+            index = opened._index()
+            fully_merged = True
+            for name in opened._event_names():
+                destination = target_events / name
+                if name in self:
+                    if on_conflict == "skip":
+                        result.skipped.append(name)
+                        fully_merged = False
+                        continue
+                    shutil.rmtree(destination)
+                    result.replaced.append(name)
+                else:
+                    result.added.append(name)
+                source = path / "events" / name
+                if move:
+                    shutil.move(source, destination)
+                else:
+                    shutil.copytree(source, destination)
+                if index is not None and name in index.get("events", {}):
+                    entries[name] = index["events"][name]
+                else:
+                    entries[name] = _event_index_entry(
+                        _as_group(self._events[name], name)
+                    )
+            if move and fully_merged:
+                shutil.rmtree(path)
+
+        if self._index() is None:
+            self.rebuild_index()  # a legacy store: index everything, once
+        elif entries:
+            events = {**self._index().get("events", {}), **entries}  # type: ignore[union-attr]
+            self._root.attrs[self.INDEX_ATTR] = {"events": dict(sorted(events.items()))}
+        return result
 
     def _event_names(self) -> list[str]:
         index = self._index()
