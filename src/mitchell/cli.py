@@ -7,7 +7,7 @@ from pathlib import Path
 
 import click
 
-from mitchell.store import MitchellStore
+from mitchell.store import MitchellStore, Mode
 
 _EVENT_NAME_RE = re.compile(r"GW\d{6}_\d{6}")
 
@@ -57,7 +57,7 @@ def from_pesummary(
     H5_PATH   Path to a .h5 file, or a directory of .h5 files.
     ZARR_PATH Destination zarr store directory (created if absent).
 
-    When H5_PATH is a directory every *.h5 file within it is converted and
+    When H5_PATH is a directory every ``*.h5`` file within it is converted and
     appended to the same zarr store.  Event names are inferred from filenames
     using the GWTC naming convention (GW{YYMMDD}_{HHMMSS}).
 
@@ -82,7 +82,7 @@ def from_pesummary(
         _run_single(source, name, zarr_path, "w" if overwrite else "a")
 
 
-def _run_single(h5_path: Path, event_name: str, zarr_path: str, mode: str) -> None:
+def _run_single(h5_path: Path, event_name: str, zarr_path: str, mode: Mode) -> None:
     import h5py as h5
 
     click.echo(f"Translating {h5_path} → {zarr_path} (event: {event_name})")
@@ -97,7 +97,7 @@ def _run_batch(files: list[Path], zarr_path: str, overwrite: bool) -> None:
     click.echo(f"Converting {len(files)} file(s) → {zarr_path}")
     for i, h5_path in enumerate(files):
         event_name = _infer_event_name(h5_path)
-        mode = "w" if (overwrite and i == 0) else "a"
+        mode: Mode = "w" if (overwrite and i == 0) else "a"
         _run_single(h5_path, event_name, zarr_path, mode)
 
 

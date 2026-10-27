@@ -64,12 +64,12 @@ def _make_store(tmp_path) -> MitchellStore:
     return MitchellStore(store, mode="a")
 
 
-@pytest.fixture()
+@pytest.fixture
 def ms(tmp_path):
     return _make_store(tmp_path)
 
 
-@pytest.fixture()
+@pytest.fixture
 def analysis(ms) -> Analysis:
     return ms["GW000000"]["IMRPhenomXPHM"]
 
@@ -77,6 +77,7 @@ def analysis(ms) -> Analysis:
 # ---------------------------------------------------------------------------
 # MitchellStore tests
 # ---------------------------------------------------------------------------
+
 
 class TestMitchellStore:
     def test_schema_version_attribute(self, ms):
@@ -114,6 +115,7 @@ class TestMitchellStore:
 # Event tests
 # ---------------------------------------------------------------------------
 
+
 class TestEvent:
     def test_name(self, ms):
         assert ms["GW000000"].name == "GW000000"
@@ -137,6 +139,7 @@ class TestEvent:
 # ---------------------------------------------------------------------------
 # Analysis tests
 # ---------------------------------------------------------------------------
+
 
 class TestAnalysis:
     def test_name(self, analysis):
@@ -188,6 +191,7 @@ class TestAnalysis:
 # ArviZ conversion tests
 # ---------------------------------------------------------------------------
 
+
 class TestToArviz:
     def test_returns_inference_data(self, analysis):
         pytest.importorskip("arviz")
@@ -227,7 +231,8 @@ class TestToArviz:
 # CLI tests
 # ---------------------------------------------------------------------------
 
-@pytest.fixture()
+
+@pytest.fixture
 def runner():
     return CliRunner()
 
@@ -332,8 +337,12 @@ class TestCli:
         result = runner.invoke(
             cli,
             [
-                "from-pesummary", "--overwrite", h5_path, str(out),
-                "--event-name", "GW150914_095045",
+                "from-pesummary",
+                "--overwrite",
+                h5_path,
+                str(out),
+                "--event-name",
+                "GW150914_095045",
             ],
         )
         assert result.exit_code == 0
@@ -370,8 +379,11 @@ class TestCli:
         result = runner.invoke(
             cli,
             [
-                "from-pesummary", str(src_dir), str(out),
-                "--event-name", "GW150914_095045",
+                "from-pesummary",
+                str(src_dir),
+                str(out),
+                "--event-name",
+                "GW150914_095045",
             ],
         )
         assert result.exit_code != 0
@@ -380,6 +392,7 @@ class TestCli:
 # ---------------------------------------------------------------------------
 # Event name inference unit tests
 # ---------------------------------------------------------------------------
+
 
 class TestDecode:
     def test_unwraps_length_one_array(self):
@@ -418,7 +431,7 @@ class TestInferEventName:
 
     def test_no_gw_pattern_raises(self, tmp_path):
         import click
+
         p = tmp_path / "some_random_file.h5"
         with pytest.raises(click.BadParameter):
             _infer_event_name(p)
-

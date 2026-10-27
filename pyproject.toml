@@ -8,7 +8,7 @@ dynamic = ["version"]
 description = "Cloud-ready gravitational-wave analysis data library using zarr"
 readme = "README.md"
 license = { text = "MIT" }
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 dependencies = [
     "zarr >= 3.0",
     "numpy >= 1.24",
@@ -61,6 +61,7 @@ version-file = "src/mitchell/_version.py"
 [tool.ruff]
 src = ["src"]
 line-length = 88
+extend-exclude = ["src/mitchell/_version.py"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "S", "B", "A", "C4", "PT"]
@@ -69,8 +70,12 @@ select = ["E", "F", "I", "UP", "S", "B", "A", "C4", "PT"]
 "tests/**" = ["S101"]
 
 [tool.mypy]
-python_version = "3.10"
+python_version = "3.11"
 strict = true
+
+[[tool.mypy.overrides]]
+module = ["arviz", "h5py", "gwresults"]
+ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
