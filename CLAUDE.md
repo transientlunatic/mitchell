@@ -7,9 +7,11 @@ data products (posterior samples, normalising flows, etc.) backed by zarr.
 
 ```
 src/mitchell/       Core Python library
+bindings/javascript/ TypeScript reader (zarrita); `npm test` in that dir
 bindings/julia/     Future: Julia impl of schema using Zarr.jl
 bindings/r/         Future: R impl of schema using pizzarr
 tests/              pytest test suite
+tests/conformance/  Shared fixture store + expected.json read by every binding
 .github/workflows/  ci.yml
 ```
 
