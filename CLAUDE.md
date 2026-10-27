@@ -41,7 +41,7 @@ mypy src/mitchell
 
 ## Key constraints
 
-- **Python ≥ 3.10**, zarr ≥ 3.0 (zarr v3 format throughout).
+- **Python ≥ 3.11**, zarr ≥ 3.0 (zarr v3 format throughout).
 - `src/` layout — package root is `src/mitchell/`.
 - The zarr store schema is the stability contract; all language bindings must
   conform to it.  Document schema changes clearly.

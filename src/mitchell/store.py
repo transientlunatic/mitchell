@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import os
+from collections.abc import Iterator, Mapping
 from pathlib import Path
-from typing import TYPE_CHECKING, Iterator
+from typing import TYPE_CHECKING, Any, Literal
 
 import numpy as np
 import zarr
@@ -16,15 +17,27 @@ if TYPE_CHECKING:
 # Internal helpers
 # ---------------------------------------------------------------------------
 
+Mode = Literal["r", "r+", "a", "w", "w-"]
+
 _META_ATTRS = [
-    "approximant", "cosmology", "delta_f", "distance_marginalization",
-    "duration", "f_final", "f_low", "f_ref", "phase_marginalization",
-    "reference_frame", "sampling_frequency", "start_time",
-    "time_marginalization", "time_reference",
+    "approximant",
+    "cosmology",
+    "delta_f",
+    "distance_marginalization",
+    "duration",
+    "f_final",
+    "f_low",
+    "f_ref",
+    "phase_marginalization",
+    "reference_frame",
+    "sampling_frequency",
+    "start_time",
+    "time_marginalization",
+    "time_reference",
 ]
 
 
-def _decode(val: object) -> object:
+def _decode(val: Any) -> Any:
     """Unwrap length-1 arrays and decode byte strings for zarr attributes."""
     if isinstance(val, np.ndarray) and val.ndim == 1 and len(val) == 1:
         val = val[0]
@@ -37,14 +50,22 @@ def _decode(val: object) -> object:
     return val
 
 
+def _as_group(node: object, path: str) -> zarr.Group:
+    """Narrow a zarr node to a group (zarr's ``__getitem__`` returns a union)."""
+    if not isinstance(node, zarr.Group):
+        raise TypeError(f"{path!r} is not a zarr group")
+    return node
+
+
 def _columnar_to_dict(group: zarr.Group) -> dict[str, np.ndarray]:
     """Return {param: array} for every array dataset in *group*."""
-    return {k: group[k][:] for k in group.array_keys()}
+    return {k: np.asarray(group[k][:]) for k in group.array_keys()}  # type: ignore[index]
 
 
 # ---------------------------------------------------------------------------
 # Analysis
 # ---------------------------------------------------------------------------
+
 
 class Analysis:
     """A single PE analysis (waveform approximant run) within an event.
@@ -63,7 +84,7 @@ class Analysis:
         return self._group.name.split("/")[-1]
 
     @property
-    def attrs(self) -> zarr.attrs.Attributes:
+    def attrs(self) -> Mapping[str, Any]:
         return self._group.attrs
 
     # -- data product properties --------------------------------------------
@@ -71,43 +92,47 @@ class Analysis:
     @property
     def posterior(self) -> zarr.Group | None:
         """Zarr group of columnar posterior sample arrays, or None."""
-        if "posterior" in self._group and "samples" in self._group["posterior"]:
-            return self._group["posterior"]["samples"]
+        if "posterior" in self._group:
+            posterior = _as_group(self._group["posterior"], "posterior")
+            if "samples" in posterior:
+                return _as_group(posterior["samples"], "posterior/samples")
         return None
 
     @property
     def priors(self) -> zarr.Group | None:
         """Zarr group containing ``samples`` and/or ``analytic`` sub-groups."""
         if "priors" in self._group:
-            return self._group["priors"]
+            return _as_group(self._group["priors"], "priors")
         return None
 
     @property
     def psds(self) -> zarr.Group | None:
         """Zarr group of PSD arrays keyed by detector name."""
         if "psds" in self._group:
-            return self._group["psds"]
+            return _as_group(self._group["psds"], "psds")
         return None
 
     @property
     def calibration_envelope(self) -> zarr.Group | None:
         """Zarr group of calibration envelope arrays keyed by detector."""
         if "calibration_envelope" in self._group:
-            return self._group["calibration_envelope"]
+            return _as_group(
+                self._group["calibration_envelope"], "calibration_envelope"
+            )
         return None
 
     @property
     def skymap(self) -> zarr.Group | None:
         """Zarr group containing the HEALPix skymap ``data`` array."""
         if "skymap" in self._group:
-            return self._group["skymap"]
+            return _as_group(self._group["skymap"], "skymap")
         return None
 
     @property
     def config(self) -> dict[str, object]:
         """Config file key-value pairs as a plain dict."""
         if "config_file" in self._group:
-            return dict(self._group["config_file"].attrs)
+            return dict(_as_group(self._group["config_file"], "config_file").attrs)
         return {}
 
     # -- ArviZ conversion ---------------------------------------------------
@@ -139,14 +164,19 @@ class Analysis:
             data["posterior"] = {k: v[np.newaxis, :] for k, v in post.items()}
 
         if self.priors is not None and "samples" in self.priors:
-            prior = _columnar_to_dict(self.priors["samples"])
+            prior = _columnar_to_dict(
+                _as_group(self.priors["samples"], "priors/samples")
+            )
             data["prior"] = {k: v[np.newaxis, :] for k, v in prior.items()}
 
         if self.psds is not None:
-            psd_data = {det: self.psds[det][:] for det in self.psds.array_keys()}
+            psd_data = _columnar_to_dict(self.psds)
             data["observed_data"] = psd_data
 
-        return az.from_dict(data)
+        # ArviZ 1.x takes a dict of groups; 0.x takes one keyword per group.
+        if int(az.__version__.split(".")[0]) >= 1:
+            return az.from_dict(data)
+        return az.from_dict(**data)
 
     def __repr__(self) -> str:
         return f"Analysis({self.name!r})"
@@ -155,6 +185,7 @@ class Analysis:
 # ---------------------------------------------------------------------------
 # Event
 # ---------------------------------------------------------------------------
+
 
 class Event:
     """A gravitational-wave event containing one or more analyses.
@@ -173,11 +204,11 @@ class Event:
         return self._group.name.split("/")[-1]
 
     def __getitem__(self, analysis_name: str) -> Analysis:
-        return Analysis(self._group[analysis_name])
+        return Analysis(_as_group(self._group[analysis_name], analysis_name))
 
     def __iter__(self) -> Iterator[Analysis]:
         for key in self._group.group_keys():
-            yield Analysis(self._group[key])
+            yield Analysis(_as_group(self._group[key], key))
 
     def __len__(self) -> int:
         return sum(1 for _ in self._group.group_keys())
@@ -190,6 +221,7 @@ class Event:
 # ---------------------------------------------------------------------------
 # MitchellStore
 # ---------------------------------------------------------------------------
+
 
 class MitchellStore:
     """A zarr-backed store of gravitational-wave analysis data products.
@@ -212,7 +244,7 @@ class MitchellStore:
     def __init__(
         self,
         store: zarr.storage.StoreLike,
-        mode: str = "a",
+        mode: Mode = "a",
     ) -> None:
         self._store = store
         self._root = zarr.open_group(store=store, mode=mode)
@@ -224,8 +256,8 @@ class MitchellStore:
     @classmethod
     def open(
         cls,
-        path: str | os.PathLike,
-        mode: str = "a",
+        path: str | os.PathLike[str],
+        mode: Mode = "a",
     ) -> MitchellStore:
         """Open (or create) a store at *path* on the local filesystem."""
         store = zarr.storage.LocalStore(Path(path))
@@ -234,10 +266,10 @@ class MitchellStore:
     @classmethod
     def from_pesummary_h5(
         cls,
-        h5_path: str | os.PathLike,
+        h5_path: str | os.PathLike[str],
         event_name: str,
-        zarr_path: str | os.PathLike,
-        mode: str = "a",
+        zarr_path: str | os.PathLike[str],
+        mode: Mode = "a",
     ) -> MitchellStore:
         """Translate a GWTC pesummary HDF5 file into a Mitchell zarr store.
 
@@ -269,10 +301,7 @@ class MitchellStore:
                 analysis = event.require_group(analysis_name)
 
                 # -- meta_data attributes --
-                if (
-                    "meta_data" in h5_group
-                    and "meta_data" in h5_group["meta_data"]
-                ):
+                if "meta_data" in h5_group and "meta_data" in h5_group["meta_data"]:
                     md = h5_group["meta_data"]["meta_data"]
                     analysis.attrs.update(
                         {k: _decode(md[k][()]) for k in _META_ATTRS if k in md}
@@ -281,9 +310,7 @@ class MitchellStore:
                 if "version" in h5_group:
                     analysis.attrs["version"] = _decode(h5_group["version"][()])
                 if "description" in h5_group:
-                    analysis.attrs["description"] = _decode(
-                        h5_group["description"][()]
-                    )
+                    analysis.attrs["description"] = _decode(h5_group["description"][()])
 
                 # -- posterior samples --
                 if "posterior_samples" in h5_group:
@@ -318,23 +345,16 @@ class MitchellStore:
                 # -- calibration envelope --
                 if "calibration_envelope" in h5_group:
                     cal_group = analysis.require_group("calibration_envelope")
-                    for detector, dataset in h5_group[
-                        "calibration_envelope"
-                    ].items():
+                    for detector, dataset in h5_group["calibration_envelope"].items():
                         cal_group[detector] = dataset[()]
 
                 # -- config file --
-                if (
-                    "config_file" in h5_group
-                    and "config" in h5_group["config_file"]
-                ):
+                if "config_file" in h5_group and "config" in h5_group["config_file"]:
                     config_group = analysis.require_group("config_file")
                     config_group.attrs.update(
                         {
                             k: _decode(v[()])
-                            for k, v in h5_group["config_file"][
-                                "config"
-                            ].items()
+                            for k, v in h5_group["config_file"]["config"].items()
                             if isinstance(v, h5.Dataset)
                         }
                     )
@@ -359,26 +379,30 @@ class MitchellStore:
 
     # -- event access -------------------------------------------------------
 
+    @property
+    def _events(self) -> zarr.Group:
+        return _as_group(self._root["events"], "events")
+
     def __getitem__(self, event_name: str) -> Event:
-        return Event(self._root["events"][event_name])
+        return Event(_as_group(self._events[event_name], event_name))
 
     def __contains__(self, event_name: str) -> bool:
-        return "events" in self._root and event_name in self._root["events"]
+        return "events" in self._root and event_name in self._events
 
     def __delitem__(self, event_name: str) -> None:
-        del self._root["events"][event_name]
+        del self._events[event_name]
         zarr.consolidate_metadata(self._store)
 
     def __iter__(self) -> Iterator[Event]:
         if "events" not in self._root:
             return
-        for key in self._root["events"].group_keys():
-            yield Event(self._root["events"][key])
+        for key in self._events.group_keys():
+            yield Event(_as_group(self._events[key], key))
 
     def __len__(self) -> int:
         if "events" not in self._root:
             return 0
-        return sum(1 for _ in self._root["events"].group_keys())
+        return sum(1 for _ in self._events.group_keys())
 
     def __repr__(self) -> str:
         n = len(self)
