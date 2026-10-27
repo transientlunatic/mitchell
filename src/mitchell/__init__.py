@@ -17,4 +17,4 @@ except ImportError:
 
 from mitchell.store import Analysis, Event, MitchellStore
 
-__all__ = ["Analysis", "Event", "MitchellStore"]
+__all__ = ["Analysis", "Event", "MitchellStore", "__version__"]

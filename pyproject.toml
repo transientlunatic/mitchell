@@ -33,6 +33,7 @@ gwtc = [
 ]
 dev = [
     "arviz",
+    "htcondor",  # its submit-description parser checks the generated Condor files
     "pytest >= 8.0",
     "pytest-cov",
     "ruff",

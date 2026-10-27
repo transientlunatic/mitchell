@@ -5,3 +5,6 @@ Convert PESummary HDF5 files with `mitchell from-pesummary`, or build a
 store straight from every published GWTC event with
 `mitchell from-gwtc` (requires the optional `gwresults` dependency:
 `pip install 'mitchell[gwtc]'`). See `CLAUDE.md` for details.
+
+To build a catalogue in parallel on an HTCondor pool, generate a DAG with
+`mitchell condor-dag` (see `docs/condor.md`).
