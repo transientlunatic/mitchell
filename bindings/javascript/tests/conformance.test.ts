@@ -156,3 +156,44 @@ describe("opening a store", () => {
     expect(ms.eventNames()).toEqual(["NEW"]);
   });
 });
+
+/**
+ * Many static hosts (and `vite preview`, and `.htaccess` catch-all rewrites)
+ * answer 200 with an HTML page for a path that does not exist, instead of 404.
+ * Mitchell stores are zarr v3 only, so the reader must never ask for v2
+ * metadata (`.zarray`, `.zattrs`) that such a host would answer with HTML.
+ */
+class CatchAllHtmlStore {
+  readonly requested: string[] = [];
+  private readonly inner = new FileSystemStore(join(CONFORMANCE, "store.zarr"));
+  private readonly html = new TextEncoder().encode("<!doctype html><title>app</title>");
+
+  async get(key: `/${string}`) {
+    this.requested.push(key);
+    return (await this.inner.get(key)) ?? this.html;
+  }
+  async getRange(key: `/${string}`, range: never) {
+    this.requested.push(key);
+    return this.inner.getRange?.(key, range);
+  }
+}
+
+describe("a host that answers HTML for missing paths", () => {
+  it("still reads arrays and groups, asking only for zarr v3 metadata", async () => {
+    const store = new CatchAllHtmlStore();
+    const ms = await MitchellStore.open(store as never);
+    const event = await ms.get("GW150914_095045");
+    const a = await event.get("C01:IMRPhenomXPHM");
+
+    const mass = await a.posterior!.get("mass_1");
+    check(mass, [mass.length], expected.events.GW150914_095045["C01:IMRPhenomXPHM"].posterior.mass_1);
+    const { data, shape } = await a.psds!.get("H1");
+    check(data, shape, expected.events.GW150914_095045["C01:IMRPhenomXPHM"].psds.H1);
+    expect(await a.getConfig()).toEqual(
+      expected.events.GW150914_095045["C01:IMRPhenomXPHM"].config,
+    );
+
+    const v2 = store.requested.filter((k) => /\.(zarray|zattrs|zgroup)$/.test(k));
+    expect(v2).toEqual([]);
+  });
+});

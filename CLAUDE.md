@@ -49,4 +49,6 @@ mypy src/mitchell
   index.
 - The zarr store schema is the stability contract; all language bindings must
   conform to it.  Document schema changes clearly.
+- `scripts/build_demo_store.py` trims a PESummary metafile into a small store
+  (used for the viewer's committed GW150914 demo).
 - Dual-licensed MIT.

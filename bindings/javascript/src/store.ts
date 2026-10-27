@@ -77,7 +77,10 @@ async function readArray(
   rootLoc: RootLocation,
   path: string,
 ): Promise<{ data: Float64Array; shape: number[] }> {
-  const arr = await zarrita.open(rootLoc.resolve(path), { kind: "array" });
+  // v3 only: plain `zarrita.open` also probes for v2 metadata (.zarray,
+  // .zattrs), which wastes requests and fails outright on hosts that answer
+  // HTML (200) for missing paths.
+  const arr = await zarrita.open.v3(rootLoc.resolve(path), { kind: "array" });
   const chunk = await zarrita.get(arr, null);
   return { data: chunk.data as Float64Array, shape: chunk.shape };
 }
@@ -378,7 +381,7 @@ function buildAnalysis(
 
   const configPath = `${analysisPath}/config_file`;
   const loadConfig = async () => {
-    const group = await zarrita.open(rootLoc.resolve(configPath), {
+    const group = await zarrita.open.v3(rootLoc.resolve(configPath), {
       kind: "group",
     });
     return group.attrs as Record<string, unknown>;

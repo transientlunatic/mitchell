@@ -28,7 +28,7 @@ is its executable form.
             │   └── analytic/
             │       └── zarr.json      # {param: "Prior string"} attributes
             ├── psds/
-            │   ├── H1                 # (N, 2) float64  [frequency, ASD]
+            │   ├── H1                 # (N, 2) float64  [frequency, PSD]
             │   └── L1
             ├── calibration_envelope/
             │   ├── H1                 # (300, 7) float64
@@ -42,6 +42,12 @@ is its executable form.
 
 Everything is plain zarr v3.  A reader needs nothing beyond zarr itself to
 read any array or group above once it knows the path.
+
+`psds/{detector}` holds the **power** spectral density in 1/Hz (about 1e-46
+near 100 Hz for LIGO), as PESummary stores it, not the amplitude spectral
+density.  Frequency bins below the analysis's `f_low` are unused and may hold
+placeholder values (0.5 in the GWTC-2.1 GW150914 file) rather than a measured PSD, so
+readers should ignore them.
 
 Event and analysis names are used verbatim as zarr node names.  Analysis
 names commonly contain a colon (`C01:IMRPhenomXPHM`); percent-encode them
@@ -99,12 +105,17 @@ Rules:
   attributes in the tree win if they disagree, and a writer that changes the
   tree must update the index in the same operation.
 * Event and analysis keys are sorted, so the index is deterministic.
-* Bulk data is never copied into the index, so it stays small (on the order
-  of a kilobyte per analysis plus parameter names) and the catalogue of a
-  large release remains a single cheap request.
+* Bulk data is never copied into the index.  It still grows with the number
+  of parameters and with the analytic priors: measured on the GWTC-2.1
+  GW150914 file, a small analysis costs about 1.2-1.6 KB and the complete
+  137-parameter one about 18 KB (mostly its analytic prior strings), so that
+  event's index is 21 KB.  A catalogue-wide index is therefore megabytes, not
+  kilobytes; if that ever matters, the heavy parts (`attrs`, `priors.analytic`)
+  are the ones to move out of the index.
 * Zarr's *consolidated metadata* is not used.  It is not part of the zarr v3
   specification, so other implementations need not support it, and it embeds
-  every array's full codec metadata, which makes it many times larger.
+  every array's full codec metadata, which makes it many times larger (about
+  218 KB against 21 KB for the same GW150914 event).
 
 ## Versioning
 

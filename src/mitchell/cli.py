@@ -7,7 +7,7 @@ from pathlib import Path
 
 import click
 
-from mitchell.store import MitchellStore, Mode
+from mitchell.store import MitchellStore, Mode, analysis_groups
 
 _EVENT_NAME_RE = re.compile(r"GW\d{6}_\d{6}")
 
@@ -87,7 +87,7 @@ def _run_single(h5_path: Path, event_name: str, zarr_path: str, mode: Mode) -> N
 
     click.echo(f"Translating {h5_path} → {zarr_path} (event: {event_name})")
     with h5.File(h5_path, "r") as f:
-        analyses = list(f.keys())
+        analyses = list(analysis_groups(f))
     click.echo(f"  {len(analyses)} analysis group(s): {', '.join(analyses)}")
     MitchellStore.from_pesummary_h5(h5_path, event_name, zarr_path, mode=mode)
     click.echo("Done.")

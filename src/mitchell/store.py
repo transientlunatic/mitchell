@@ -57,6 +57,20 @@ def _as_group(node: object, path: str) -> zarr.Group:
     return node
 
 
+def analysis_groups(h5_file: Any) -> dict[str, Any]:
+    """The analysis groups of an open PESummary metafile, by label.
+
+    A metafile holds one group per analysis (each with ``posterior_samples``)
+    next to file-level groups such as ``history`` and ``version``, which
+    describe the file itself and are not analyses.
+    """
+    return {
+        label: group
+        for label, group in h5_file.items()
+        if hasattr(group, "keys") and "posterior_samples" in group
+    }
+
+
 def _subgroup(group: zarr.Group, key: str) -> zarr.Group | None:
     """Return ``group[key]`` if it exists (and is a group), else None."""
     return _as_group(group[key], key) if key in group else None
@@ -433,7 +447,7 @@ class MitchellStore:
         event = root.require_group(f"events/{event_name}")
 
         with h5.File(h5_path, "r") as f:
-            for analysis_name, h5_group in f.items():
+            for analysis_name, h5_group in analysis_groups(f).items():
                 analysis = event.require_group(analysis_name)
 
                 # -- meta_data attributes --
