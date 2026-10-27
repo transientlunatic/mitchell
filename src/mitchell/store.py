@@ -173,7 +173,10 @@ class Analysis:
             psd_data = _columnar_to_dict(self.psds)
             data["observed_data"] = psd_data
 
-        return az.from_dict(data)
+        # ArviZ 1.x takes a dict of groups; 0.x takes one keyword per group.
+        if int(az.__version__.split(".")[0]) >= 1:
+            return az.from_dict(data)
+        return az.from_dict(**data)
 
     def __repr__(self) -> str:
         return f"Analysis({self.name!r})"
