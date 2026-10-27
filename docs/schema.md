@@ -99,12 +99,17 @@ Rules:
   attributes in the tree win if they disagree, and a writer that changes the
   tree must update the index in the same operation.
 * Event and analysis keys are sorted, so the index is deterministic.
-* Bulk data is never copied into the index, so it stays small (on the order
-  of a kilobyte per analysis plus parameter names) and the catalogue of a
-  large release remains a single cheap request.
+* Bulk data is never copied into the index.  It still grows with the number
+  of parameters and with the analytic priors: measured on the GWTC-2.1
+  GW150914 file, a small analysis costs about 1.2-1.6 KB and the complete
+  137-parameter one about 18 KB (mostly its analytic prior strings), so that
+  event's index is 21 KB.  A catalogue-wide index is therefore megabytes, not
+  kilobytes; if that ever matters, the heavy parts (`attrs`, `priors.analytic`)
+  are the ones to move out of the index.
 * Zarr's *consolidated metadata* is not used.  It is not part of the zarr v3
   specification, so other implementations need not support it, and it embeds
-  every array's full codec metadata, which makes it many times larger.
+  every array's full codec metadata, which makes it many times larger (about
+  218 KB against 21 KB for the same GW150914 event).
 
 ## Versioning
 

@@ -6,44 +6,12 @@ import numpy as np
 import pytest
 import zarr
 from click.testing import CliRunner
+from pesummary_h5 import make_pesummary_h5
 
 from mitchell import MitchellStore
 from mitchell.cli import cli
 
 h5py = pytest.importorskip("h5py")
-
-DETECTORS = ("H1", "L1")
-
-
-def make_pesummary_h5(path, analyses=("C01:IMRPhenomXPHM", "C01:SEOBNRv4PHM")):
-    """Write a small file with the layout ``from_pesummary_h5`` reads."""
-    rng = np.random.default_rng(1)
-    with h5py.File(path, "w") as f:
-        for name in analyses:
-            g = f.create_group(name)
-            md = g.create_group("meta_data/meta_data")
-            md["approximant"] = np.bytes_(name.split(":")[1])
-            md["f_low"] = np.array([20.0])
-            g["version"] = np.bytes_("1.0")
-            g["description"] = np.bytes_("test run")
-
-            dtype = [("mass_1", "f8"), ("mass_2", "f8"), ("chi_eff", "f8")]
-            samples = np.zeros(40, dtype=dtype)
-            for k in samples.dtype.names:
-                samples[k] = rng.standard_normal(40)
-            g["posterior_samples"] = samples
-
-            g["priors/samples/mass_1"] = rng.random(40)
-            g["priors/analytic/mass_1"] = np.bytes_("Uniform(5, 100)")
-
-            for det in DETECTORS:
-                g[f"psds/{det}"] = rng.random((16, 2))
-                g[f"calibration_envelope/{det}"] = rng.random((300, 7))
-
-            g["config_file/config/sampler"] = np.bytes_("dynesty")
-
-            g["skymap/data"] = rng.random(48)
-            g["skymap/meta_data/nside"] = np.array([2])
 
 
 def root_json(zarr_path) -> dict:
@@ -80,8 +48,18 @@ def test_conversion_populates_index(tmp_path, h5_file):
     assert entry["priors"]["analytic"] == {"mass_1": "Uniform(5, 100)"}
     assert entry["psds"] == {"H1": [16, 2], "L1": [16, 2]}
     assert entry["calibration_envelope"]["H1"] == [300, 7]
-    assert entry["skymap"] == {"attrs": {"nside": 2}, "shape": [48]}
+    assert entry["skymap"] == {"attrs": {"nside": 2, "nest": "True"}, "shape": [48]}
     assert entry["config_file"] is True
+
+
+def test_file_level_groups_are_not_analyses(tmp_path, h5_file):
+    """PESummary's ``history`` and ``version`` groups describe the file."""
+    out = tmp_path / "s.zarr"
+    MitchellStore.from_pesummary_h5(h5_file, "GW000001_000000", out)
+    store = MitchellStore.open(out, mode="r")
+    names = [a.name for a in store["GW000001_000000"]]
+    assert names == ["C01:IMRPhenomXPHM", "C01:SEOBNRv4PHM"]
+    assert list(store._index()["events"]["GW000001_000000"]) == names
 
 
 def test_no_consolidated_metadata_is_written(tmp_path, h5_file):
